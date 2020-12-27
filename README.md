@@ -18,6 +18,9 @@ Download the binary from [GitHub Releases][release] and drop it in your `$PATH`.
 - [Linux][release]
 - [Windows][release]
 
+```
+go get -u github.com/lupinthe14th/ecc/...
+```
 
 ## Getting Started
 
