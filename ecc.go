@@ -18,15 +18,15 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// AmplitudeIs is ...
-type AmplitudeId struct {
-	DeviceId       string `json:"deviceId"`
-	UserId         string `json:"userId,omitempty"`
+// AmplitudeID wraps the httpresponce.header response.
+type AmplitudeID struct {
+	DeviceID       string `json:"deviceId"`
+	UserID         string `json:"userId,omitempty"`
 	OptOut         bool   `json:"optOut"`
-	SessionId      int    `json:"sessionId"`
+	SessionID      int    `json:"sessionId"`
 	LastEventTime  int    `json:"lastEventTime"`
-	EventId        int    `json:"eventId"`
-	IdentifyId     int    `json:"identifyId"`
+	EventID        int    `json:"eventId"`
+	IdentifyID     int    `json:"identifyId"`
 	SequenceNumber int    `json:"sequenceNumber"`
 }
 
@@ -219,14 +219,14 @@ func run() {
 	var b bytes.Buffer
 	b.ReadFrom(page.Body)
 	total := gjson.GetBytes(b.Bytes(), "hits.total.value").Int()
-	scroll_size := total
-	log.Printf("scroll size: %v", scroll_size)
+	scrollSize := total
+	log.Printf("scroll size: %v", scrollSize)
 	took := gjson.GetBytes(b.Bytes(), "took").Int()
 	sid := gjson.GetBytes(b.Bytes(), "_scroll_id").String()
 	log.Printf("sid: %v", sid)
 
-	amplitudeId := AmplitudeId{}
-	amplitudeIds := make([]AmplitudeId, 0, scroll_size)
+	amplitudeID := AmplitudeID{}
+	amplitudeIDs := make([]AmplitudeID, 0, scrollSize)
 
 	for _, hit := range gjson.GetBytes(b.Bytes(), "hits.hits").Array() {
 		for k, v := range hit.Map() {
@@ -242,11 +242,11 @@ func run() {
 								if err != nil {
 									log.Printf("ERROR: %v", err)
 								}
-								err = json.Unmarshal(sDec, &amplitudeId)
+								err = json.Unmarshal(sDec, &amplitudeID)
 								if err != nil {
 									log.Printf("ERROR: %v", err)
 								}
-								amplitudeIds = append(amplitudeIds, amplitudeId)
+								amplitudeIDs = append(amplitudeIDs, amplitudeID)
 							}
 						}
 					}
@@ -255,7 +255,7 @@ func run() {
 		}
 	}
 
-	for scroll_size > 0 {
+	for scrollSize > 0 {
 		res, err := es.Scroll(
 			es.Scroll.WithScrollID(sid),
 			es.Scroll.WithScroll(m),
@@ -295,11 +295,11 @@ func run() {
 									if err != nil {
 										log.Printf("ERROR: %v", err)
 									}
-									err = json.Unmarshal(sDec, &amplitudeId)
+									err = json.Unmarshal(sDec, &amplitudeID)
 									if err != nil {
 										log.Printf("ERROR: %v", err)
 									}
-									amplitudeIds = append(amplitudeIds, amplitudeId)
+									amplitudeIDs = append(amplitudeIDs, amplitudeID)
 								}
 							}
 						}
@@ -307,18 +307,18 @@ func run() {
 				}
 			}
 		}
-		scroll_size = int64(len(gjson.GetBytes(buf.Bytes(), "hits.hits").Array()))
+		scrollSize = int64(len(gjson.GetBytes(buf.Bytes(), "hits.hits").Array()))
 		took += gjson.GetBytes(buf.Bytes(), "took").Int()
-		log.Printf("scroll size: %v", scroll_size)
-		log.Printf("amplitude Id: %v", len(amplitudeIds))
+		log.Printf("scroll size: %v", scrollSize)
+		log.Printf("amplitude Id: %v", len(amplitudeIDs))
 	}
-	out, err := json.Marshal(&amplitudeIds)
+	out, err := json.Marshal(&amplitudeIDs)
 	if err != nil {
 		log.Fatalf("ERROR: %v", err)
 	}
 	fmt.Println(string(out))
 
-	log.Printf("amplitude Id count: %v", len(amplitudeIds))
+	log.Printf("amplitude Id count: %v", len(amplitudeIDs))
 	log.Println(strings.Repeat("=", 37))
 	log.Printf(
 		"[%s] %d hits; took: %dms\n",
@@ -328,25 +328,25 @@ func run() {
 	)
 	log.Println(strings.Repeat("=", 37))
 	memo := make(map[string]int)
-	for _, v := range amplitudeIds {
-		memo[v.UserId]++
+	for _, v := range amplitudeIDs {
+		memo[v.UserID]++
 	}
 	type user struct {
 		uuid  string
 		count int
 	}
-	userIds := make([]user, 0, len(memo))
+	userIDs := make([]user, 0, len(memo))
 	for k, v := range memo {
-		userIds = append(userIds, user{uuid: k, count: v})
+		userIDs = append(userIDs, user{uuid: k, count: v})
 	}
-	sort.SliceStable(userIds, func(i, j int) bool {
-		if userIds[i].count == userIds[j].count {
-			return userIds[i].uuid < userIds[j].uuid
+	sort.SliceStable(userIDs, func(i, j int) bool {
+		if userIDs[i].count == userIDs[j].count {
+			return userIDs[i].uuid < userIDs[j].uuid
 		}
-		return userIds[i].count < userIds[j].count
+		return userIDs[i].count < userIDs[j].count
 	})
-	for i, userId := range userIds {
-		log.Printf("%v: %v:%v", i, userId.uuid, userId.count)
+	for i, userID := range userIDs {
+		log.Printf("%v: %v:%v", i, userID.uuid, userID.count)
 	}
 }
 
