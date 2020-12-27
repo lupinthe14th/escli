@@ -1,4 +1,4 @@
-project_name: zfdiff
+project_name: ecc
 env:
   - GO111MODULE=on
 before:
@@ -6,7 +6,7 @@ before:
     - go mod tidy
 builds:
   - main: .
-    binary: zfdiff
+    binary: ecc
     ldflags:
       - -s -w
       - -X main.Version={{.Version}}

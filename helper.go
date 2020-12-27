@@ -1,4 +1,4 @@
-package main
+package ecc
 
 // trimNexEqual は最初の=の次から末尾までの文字列を返す
 func trimNextEqual(s string) string {
