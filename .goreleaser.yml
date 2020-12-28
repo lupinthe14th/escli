@@ -9,8 +9,8 @@ builds:
     binary: escli
     ldflags:
       - -s -w
-      - -X github.com/lupinthe14th/esclic/pkg/version.Version={{.Version}}
-      - -X github.com/lupinthe14th/esclic/pkg/version.Revision={{.ShortCommit}}
+      - -X github.com/lupinthe14th/escli/pkg/version.Version={{.Version}}
+      - -X github.com/lupinthe14th/escli/pkg/version.Revision={{.ShortCommit}}
     env:
       - CGO_ENABLED=0
 archives:
