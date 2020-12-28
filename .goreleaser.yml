@@ -1,4 +1,4 @@
-project_name: zfdiff
+project_name: escli
 env:
   - GO111MODULE=on
 before:
@@ -6,11 +6,11 @@ before:
     - go mod tidy
 builds:
   - main: .
-    binary: zfdiff
+    binary: escli
     ldflags:
       - -s -w
-      - -X main.Version={{.Version}}
-      - -X main.Revision={{.ShortCommit}}
+      - -X github.com/lupinthe14th/esclic/pkg/version.Version={{.Version}}
+      - -X github.com/lupinthe14th/esclic/pkg/version.Revision={{.ShortCommit}}
     env:
       - CGO_ENABLED=0
 archives:
