@@ -3,22 +3,19 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/x509"
 	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
-	"log"
-	"net/http"
-	"os"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
+	"github.com/urfave/cli/v2"
 )
 
-// AmplitudeID wraps the httpresponce.header response.
+// AmplitudeID wraps the httpRequest.headers response.
 type AmplitudeID struct {
 	DeviceID       string `json:"deviceId"`
 	UserID         string `json:"userId,omitempty"`
@@ -30,33 +27,28 @@ type AmplitudeID struct {
 	SequenceNumber int    `json:"sequenceNumber"`
 }
 
-func run() {
-	log.SetFlags(0)
+var searchCommand = &cli.Command{
+	Name:   "search",
+	Usage:  "Search elasticsearch",
+	Action: searchAction,
+	Flags: []cli.Flag{
+		&cli.BoolFlag{
+			Name:    "query",
+			Aliases: []string{"q"},
+			Usage:   "Specify query json file",
+		},
+	},
+}
 
-	var (
-		err error
-	)
-
-	tp := http.DefaultTransport.(*http.Transport).Clone()
-
-	if tp.TLSClientConfig.RootCAs, err = x509.SystemCertPool(); err != nil {
-		log.Fatalf("ERROR: Problem adding system CA: %s", err)
-	}
-
-	cfg := elasticsearch.Config{
-		Addresses: []string{os.Getenv("ELASTICSEARCH_URL")},
-		Username:  os.Getenv("ELASTICSEARCH_USERNAME"),
-		Password:  os.Getenv("ELASTICSEARCH_PASSWORD"),
-		Transport: tp,
-	}
-	es, err := elasticsearch.NewClient(cfg)
-	if err != nil {
-		log.Fatalf("Error creating the client: %s", err)
-	}
-
+func searchAction(c *cli.Context) error {
 	// Search for the indexed documents
 	//
 	// Build the request body.
+	w := c.App.Writer
+	es, err := newClient(c)
+	if err != nil {
+		return err
+	}
 	query := strings.NewReader(`{
   "query": {
     "bool": {
@@ -198,32 +190,31 @@ func run() {
 		es.Search.WithSearchType("dfs_query_then_fetch"),
 	)
 	if err != nil {
-		log.Fatalf("Error getting response: %s", err)
+		return fmt.Errorf("Error getting response: %s", err)
 	}
 	defer page.Body.Close()
 
 	if page.IsError() {
 		var e map[string]interface{}
 		if err := json.NewDecoder(page.Body).Decode(&e); err != nil {
-			log.Fatalf("Error parsing the response body: %s", err)
-		} else {
-			// Print the response status and error information.
-			log.Fatalf("[%s] %s: %s",
-				page.Status(),
-				e["error"].(map[string]interface{})["type"],
-				e["error"].(map[string]interface{})["reason"],
-			)
+			return fmt.Errorf("Error parsing the response body: %s", err)
 		}
+		// Print the response status and error information.
+		return fmt.Errorf("[%s] %s: %s",
+			page.Status(),
+			e["error"].(map[string]interface{})["type"],
+			e["error"].(map[string]interface{})["reason"],
+		)
 	}
 
 	var b bytes.Buffer
 	b.ReadFrom(page.Body)
 	total := gjson.GetBytes(b.Bytes(), "hits.total.value").Int()
 	scrollSize := total
-	log.Printf("scroll size: %v", scrollSize)
+	logrus.Debugf("scroll size: %v", scrollSize)
 	took := gjson.GetBytes(b.Bytes(), "took").Int()
 	sid := gjson.GetBytes(b.Bytes(), "_scroll_id").String()
-	log.Printf("sid: %v", sid)
+	logrus.Debugf("sid: %v", sid)
 
 	amplitudeID := AmplitudeID{}
 	amplitudeIDs := make([]AmplitudeID, 0, scrollSize)
@@ -240,11 +231,11 @@ func run() {
 								sEnc := trimNextEqual(values)
 								sDec, err := b64.StdEncoding.DecodeString(sEnc)
 								if err != nil {
-									log.Printf("ERROR: %v", err)
+									return err
 								}
 								err = json.Unmarshal(sDec, &amplitudeID)
 								if err != nil {
-									log.Printf("ERROR: %v", err)
+									return err
 								}
 								amplitudeIDs = append(amplitudeIDs, amplitudeID)
 							}
@@ -261,22 +252,21 @@ func run() {
 			es.Scroll.WithScroll(m),
 		)
 		if err != nil {
-			log.Fatalf("Error getting response: %s", err)
+			return fmt.Errorf("Error getting response: %s", err)
 		}
 		defer res.Body.Close()
 
 		if res.IsError() {
 			var e map[string]interface{}
 			if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
-				log.Fatalf("Error parsing the response body: %s", err)
-			} else {
-				// Print the response status and error information.
-				log.Fatalf("[%s] %s: %s",
-					res.Status(),
-					e["error"].(map[string]interface{})["type"],
-					e["error"].(map[string]interface{})["reason"],
-				)
+				return fmt.Errorf("Error parsing the response body: %s", err)
 			}
+			// Print the response status and error information.
+			return fmt.Errorf("[%s] %s: %s",
+				res.Status(),
+				e["error"].(map[string]interface{})["type"],
+				e["error"].(map[string]interface{})["reason"],
+			)
 		}
 
 		var buf bytes.Buffer
@@ -293,11 +283,11 @@ func run() {
 									sEnc := trimNextEqual(values)
 									sDec, err := b64.StdEncoding.DecodeString(sEnc)
 									if err != nil {
-										log.Printf("ERROR: %v", err)
+										return err
 									}
 									err = json.Unmarshal(sDec, &amplitudeID)
 									if err != nil {
-										log.Printf("ERROR: %v", err)
+										return err
 									}
 									amplitudeIDs = append(amplitudeIDs, amplitudeID)
 								}
@@ -309,24 +299,22 @@ func run() {
 		}
 		scrollSize = int64(len(gjson.GetBytes(buf.Bytes(), "hits.hits").Array()))
 		took += gjson.GetBytes(buf.Bytes(), "took").Int()
-		log.Printf("scroll size: %v", scrollSize)
-		log.Printf("amplitude Id: %v", len(amplitudeIDs))
+		logrus.Debugf("scroll size: %v", scrollSize)
+		logrus.Debugf("amplitude Id: %v", len(amplitudeIDs))
 	}
 	out, err := json.Marshal(&amplitudeIDs)
 	if err != nil {
-		log.Fatalf("ERROR: %v", err)
+		return err
 	}
-	fmt.Println(string(out))
+	fmt.Fprintf(w, "%v\n", string(out))
 
-	log.Printf("amplitude Id count: %v", len(amplitudeIDs))
-	log.Println(strings.Repeat("=", 37))
-	log.Printf(
+	logrus.Debugf("amplitude Id count: %v", len(amplitudeIDs))
+	logrus.Debugf(
 		"[%s] %d hits; took: %dms\n",
 		page.Status(),
 		total,
 		took,
 	)
-	log.Println(strings.Repeat("=", 37))
 	memo := make(map[string]int)
 	for _, v := range amplitudeIDs {
 		memo[v.UserID]++
@@ -346,8 +334,9 @@ func run() {
 		return userIDs[i].count < userIDs[j].count
 	})
 	for i, userID := range userIDs {
-		log.Printf("%v: %v:%v", i, userID.uuid, userID.count)
+		logrus.Debugf("%v: %v:%v", i, userID.uuid, userID.count)
 	}
+	return nil
 }
 
 // trimNexEqual は最初の=の次から末尾までの文字列を返す
