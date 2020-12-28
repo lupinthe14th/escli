@@ -8,7 +8,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-func newClient(clicontext *cli.Context) (*elasticsearch.Client, error) {
+func newClient(c *cli.Context) (*elasticsearch.Client, error) {
 	var err error
 	tp := http.DefaultTransport.(*http.Transport).Clone()
 
@@ -16,9 +16,9 @@ func newClient(clicontext *cli.Context) (*elasticsearch.Client, error) {
 		return nil, err
 	}
 
-	address := clicontext.String("address")
-	username := clicontext.String("username")
-	password := clicontext.String("password")
+	address := c.String("address")
+	username := c.String("username")
+	password := c.String("password")
 	cfg := elasticsearch.Config{
 		Addresses: []string{address},
 		Username:  username,
