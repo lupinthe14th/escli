@@ -9,13 +9,6 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-// Info wraps the Elasticsearch information response.
-type Info struct {
-	Version *struct {
-		Number string `json:"number"`
-	} `json:"version"`
-}
-
 var versionCommand = &cli.Command{
 	Name:   "version",
 	Usage:  "Shows the version information",

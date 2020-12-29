@@ -60,6 +60,7 @@ func newApp() *cli.App {
 	app.Commands = []*cli.Command{
 		searchCommand,
 		// System
+		infoCommand,
 		versionCommand,
 	}
 	return app
