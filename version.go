@@ -9,7 +9,7 @@ import (
 	"github.com/urfave/cli/v2"
 )
 
-// Info wraps the Elasticsearch infomation response.
+// Info wraps the Elasticsearch information response.
 type Info struct {
 	Version *struct {
 		Number string `json:"number"`
