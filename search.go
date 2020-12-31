@@ -106,20 +106,12 @@ func searchAction(c *cli.Context) error {
 		for _, header := range headers {
 			if header.Map()["name"].Str == "cookie" {
 				cookie := header.Map()["value"].Str
-				for _, values := range strings.Split(cookie, ";") {
-					if strings.Contains(values, "amplitude_id") {
-						sEnc := trimNextEqual(values)
-						sDec, err := b64.StdEncoding.DecodeString(sEnc)
-						amplitudeID := AmplitudeID{}
-						if err != nil {
-							return err
-						}
-						err = json.Unmarshal(sDec, &amplitudeID)
-						if err != nil {
-							return err
-						}
-						amplitudeIDs = append(amplitudeIDs, amplitudeID)
-					}
+				amplitudeID, err := cookieToAmplitudeID(cookie)
+				if err != nil {
+					return err
+				}
+				if amplitudeID != (AmplitudeID{}) {
+					amplitudeIDs = append(amplitudeIDs, amplitudeID)
 				}
 			}
 		}
@@ -155,20 +147,12 @@ func searchAction(c *cli.Context) error {
 			for _, header := range headers {
 				if header.Map()["name"].Str == "cookie" {
 					cookie := header.Map()["value"].Str
-					for _, values := range strings.Split(cookie, ";") {
-						if strings.Contains(values, "amplitude_id") {
-							sEnc := trimNextEqual(values)
-							sDec, err := b64.StdEncoding.DecodeString(sEnc)
-							amplitudeID := AmplitudeID{}
-							if err != nil {
-								return err
-							}
-							err = json.Unmarshal(sDec, &amplitudeID)
-							if err != nil {
-								return err
-							}
-							amplitudeIDs = append(amplitudeIDs, amplitudeID)
-						}
+					amplitudeID, err := cookieToAmplitudeID(cookie)
+					if err != nil {
+						return err
+					}
+					if amplitudeID != (AmplitudeID{}) {
+						amplitudeIDs = append(amplitudeIDs, amplitudeID)
 					}
 				}
 			}
@@ -213,6 +197,25 @@ func searchAction(c *cli.Context) error {
 		logrus.Debugf("%v: %v:%v", i, userID.uuid, userID.count)
 	}
 	return nil
+}
+
+// cookieToAmplitudeID is AmplitudeID extractiong from cookie
+func cookieToAmplitudeID(cookie string) (AmplitudeID, error) {
+	var amplitudeID AmplitudeID
+	for _, values := range strings.Split(cookie, ";") {
+		if strings.Contains(values, "amplitude_id") {
+			sEnc := trimNextEqual(values)
+			sDec, err := b64.StdEncoding.DecodeString(sEnc)
+			if err != nil {
+				return (AmplitudeID{}), fmt.Errorf("Error encodeings the amplitude_id value: %s", err)
+			}
+			err = json.Unmarshal(sDec, &amplitudeID)
+			if err != nil {
+				return (AmplitudeID{}), fmt.Errorf("Error to unmarshal JSON into AmplitudeID struct: %s", err)
+			}
+		}
+	}
+	return amplitudeID, nil
 }
 
 // trimNexEqual は最初の=の次から末尾までの文字列を返す
