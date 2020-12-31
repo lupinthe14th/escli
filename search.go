@@ -175,6 +175,11 @@ func searchAction(c *cli.Context) error {
 		total,
 		took,
 	)
+	printAmplitudeIDSummary(amplitudeIDs)
+	return nil
+}
+
+func printAmplitudeIDSummary(amplitudeIDs []AmplitudeID) {
 	memo := make(map[string]int)
 	for _, v := range amplitudeIDs {
 		memo[v.UserID]++
@@ -196,7 +201,6 @@ func searchAction(c *cli.Context) error {
 	for i, userID := range userIDs {
 		logrus.Debugf("%v: %v:%v", i, userID.uuid, userID.count)
 	}
-	return nil
 }
 
 // cookieToAmplitudeID is AmplitudeID extractiong from cookie
