@@ -161,6 +161,10 @@ func searchAction(c *cli.Context) error {
 		took += gjson.GetBytes(buf.Bytes(), "took").Int()
 		logrus.Debugf("scroll size: %v", scrollSize)
 		logrus.Debugf("amplitude Id: %v", len(amplitudeIDs))
+		// in any case, only the most recently received _scroll_id should be used.
+		// See: https://www.elastic.co/guide/en/elasticsearch/reference/master/paginate-search-results.html#scroll-search-results
+		sid = gjson.GetBytes(b.Bytes(), "_scroll_id").String()
+		logrus.Debugf("sid: %v", sid)
 	}
 	out, err := json.Marshal(&amplitudeIDs)
 	if err != nil {
