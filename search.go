@@ -69,7 +69,6 @@ func searchAction(c *cli.Context) error {
 		es.Search.WithPretty(),
 		es.Search.WithSize(10000),
 		es.Search.WithScroll(m),
-		es.Search.WithSearchType("dfs_query_then_fetch"),
 		es.Search.WithSource("httpRequest.headers"),
 	)
 	if err != nil {
@@ -93,13 +92,14 @@ func searchAction(c *cli.Context) error {
 	var b bytes.Buffer
 	b.ReadFrom(page.Body)
 	total := gjson.GetBytes(b.Bytes(), "hits.total.value").Int()
-	scrollSize := total
-	logrus.Debugf("scroll size: %v", scrollSize)
+	logrus.Debugf("total hits: %v", total)
+	hits := int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
+	logrus.Debugf("hits: %v", hits)
 	took := gjson.GetBytes(b.Bytes(), "took").Int()
 	sid := gjson.GetBytes(b.Bytes(), "_scroll_id").String()
 	logrus.Debugf("sid: %v", sid)
 
-	amplitudeIDs := make([]AmplitudeID, 0, scrollSize)
+	amplitudeIDs := make([]AmplitudeID, 0, hits)
 
 	for _, hit := range gjson.GetBytes(b.Bytes(), "hits.hits").Array() {
 		headers := gjson.Get(hit.Map()["_source"].String(), "httpRequest.headers").Array()
@@ -117,7 +117,7 @@ func searchAction(c *cli.Context) error {
 		}
 	}
 
-	for scrollSize > 0 {
+	for hits > 0 {
 		res, err := es.Scroll(
 			es.Scroll.WithScrollID(sid),
 			es.Scroll.WithScroll(m),
@@ -140,9 +140,9 @@ func searchAction(c *cli.Context) error {
 			)
 		}
 
-		var buf bytes.Buffer
-		buf.ReadFrom(res.Body)
-		for _, hit := range gjson.GetBytes(buf.Bytes(), "hits.hits").Array() {
+		var b bytes.Buffer
+		b.ReadFrom(res.Body)
+		for _, hit := range gjson.GetBytes(b.Bytes(), "hits.hits").Array() {
 			headers := gjson.Get(hit.Map()["_source"].String(), "httpRequest.headers").Array()
 			for _, header := range headers {
 				if header.Map()["name"].Str == "cookie" {
@@ -157,9 +157,9 @@ func searchAction(c *cli.Context) error {
 				}
 			}
 		}
-		scrollSize = int64(len(gjson.GetBytes(buf.Bytes(), "hits.hits").Array()))
-		took += gjson.GetBytes(buf.Bytes(), "took").Int()
-		logrus.Debugf("scroll size: %v", scrollSize)
+		hits = int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
+		took += gjson.GetBytes(b.Bytes(), "took").Int()
+		logrus.Debugf("hits: %v", hits)
 		logrus.Debugf("amplitude Id: %v", len(amplitudeIDs))
 		// in any case, only the most recently received _scroll_id should be used.
 		// See: https://www.elastic.co/guide/en/elasticsearch/reference/master/paginate-search-results.html#scroll-search-results
