@@ -62,7 +62,7 @@ func searchAction(c *cli.Context) error {
 		return err
 	}
 	// Perform the search request.
-	page, err := es.Search(
+	res, err := es.Search(
 		es.Search.WithContext(context.Background()),
 		es.Search.WithIndex("log-aws-waf-*"),
 		es.Search.WithBody(query),
@@ -74,23 +74,23 @@ func searchAction(c *cli.Context) error {
 	if err != nil {
 		return fmt.Errorf("Error getting response: %s", err)
 	}
-	defer page.Body.Close()
+	defer res.Body.Close()
 
-	if page.IsError() {
+	if res.IsError() {
 		var e map[string]interface{}
-		if err := json.NewDecoder(page.Body).Decode(&e); err != nil {
+		if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
 			return fmt.Errorf("Error parsing the response body: %s", err)
 		}
 		// Print the response status and error information.
 		return fmt.Errorf("[%s] %s: %s",
-			page.Status(),
+			res.Status(),
 			e["error"].(map[string]interface{})["type"],
 			e["error"].(map[string]interface{})["reason"],
 		)
 	}
 
 	var b bytes.Buffer
-	b.ReadFrom(page.Body)
+	b.ReadFrom(res.Body)
 	total := gjson.GetBytes(b.Bytes(), "hits.total.value").Int()
 	logrus.Debugf("total hits: %v", total)
 	hits := int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
@@ -117,54 +117,55 @@ func searchAction(c *cli.Context) error {
 		}
 	}
 
-	for hits > 0 {
-		res, err := es.Scroll(
-			es.Scroll.WithScrollID(sid),
-			es.Scroll.WithScroll(m),
-		)
-		if err != nil {
-			return fmt.Errorf("Error getting response: %s", err)
-		}
-		defer res.Body.Close()
-
-		if res.IsError() {
-			var e map[string]interface{}
-			if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
-				return fmt.Errorf("Error parsing the response body: %s", err)
-			}
-			// Print the response status and error information.
-			return fmt.Errorf("[%s] %s: %s",
-				res.Status(),
-				e["error"].(map[string]interface{})["type"],
-				e["error"].(map[string]interface{})["reason"],
+	if total > hits {
+		for hits > 0 {
+			res, err := es.Scroll(
+				es.Scroll.WithScrollID(sid),
+				es.Scroll.WithScroll(m),
 			)
-		}
+			if err != nil {
+				return fmt.Errorf("Error getting response: %s", err)
+			}
 
-		var b bytes.Buffer
-		b.ReadFrom(res.Body)
-		for _, hit := range gjson.GetBytes(b.Bytes(), "hits.hits").Array() {
-			headers := gjson.Get(hit.Map()["_source"].String(), "httpRequest.headers").Array()
-			for _, header := range headers {
-				if header.Map()["name"].Str == "cookie" {
-					cookie := header.Map()["value"].Str
-					amplitudeID, err := cookieToAmplitudeID(cookie)
-					if err != nil {
-						return err
-					}
-					if amplitudeID != (AmplitudeID{}) {
-						amplitudeIDs = append(amplitudeIDs, amplitudeID)
+			if res.IsError() {
+				var e map[string]interface{}
+				if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
+					return fmt.Errorf("Error parsing the response body: %s", err)
+				}
+				// Print the response status and error information.
+				return fmt.Errorf("[%s] %s: %s",
+					res.Status(),
+					e["error"].(map[string]interface{})["type"],
+					e["error"].(map[string]interface{})["reason"],
+				)
+			}
+
+			var b bytes.Buffer
+			b.ReadFrom(res.Body)
+			for _, hit := range gjson.GetBytes(b.Bytes(), "hits.hits").Array() {
+				headers := gjson.Get(hit.Map()["_source"].String(), "httpRequest.headers").Array()
+				for _, header := range headers {
+					if header.Map()["name"].Str == "cookie" {
+						cookie := header.Map()["value"].Str
+						amplitudeID, err := cookieToAmplitudeID(cookie)
+						if err != nil {
+							return err
+						}
+						if amplitudeID != (AmplitudeID{}) {
+							amplitudeIDs = append(amplitudeIDs, amplitudeID)
+						}
 					}
 				}
 			}
+			hits = int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
+			took += gjson.GetBytes(b.Bytes(), "took").Int()
+			logrus.Debugf("hits: %v", hits)
+			logrus.Debugf("amplitude Id: %v", len(amplitudeIDs))
+			// in any case, only the most recently received _scroll_id should be used.
+			// See: https://www.elastic.co/guide/en/elasticsearch/reference/master/paginate-search-results.html#scroll-search-results
+			sid = gjson.GetBytes(b.Bytes(), "_scroll_id").String()
+			logrus.Debugf("sid: %v", sid)
 		}
-		hits = int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
-		took += gjson.GetBytes(b.Bytes(), "took").Int()
-		logrus.Debugf("hits: %v", hits)
-		logrus.Debugf("amplitude Id: %v", len(amplitudeIDs))
-		// in any case, only the most recently received _scroll_id should be used.
-		// See: https://www.elastic.co/guide/en/elasticsearch/reference/master/paginate-search-results.html#scroll-search-results
-		sid = gjson.GetBytes(b.Bytes(), "_scroll_id").String()
-		logrus.Debugf("sid: %v", sid)
 	}
 	out, err := json.Marshal(&amplitudeIDs)
 	if err != nil {
@@ -175,7 +176,7 @@ func searchAction(c *cli.Context) error {
 	logrus.Debugf("amplitude Id count: %v", len(amplitudeIDs))
 	logrus.Debugf(
 		"[%s] %d hits; took: %dms\n",
-		page.Status(),
+		res.Status(),
 		total,
 		took,
 	)
@@ -203,7 +204,7 @@ func printAmplitudeIDSummary(amplitudeIDs []AmplitudeID) {
 		return userIDs[i].count < userIDs[j].count
 	})
 	for i, userID := range userIDs {
-		logrus.Debugf("%v: %v:%v", i, userID.uuid, userID.count)
+		logrus.Debugf("%v: %v: %v", i+1, userID.uuid, userID.count)
 	}
 }
 
