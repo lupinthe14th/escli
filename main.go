@@ -54,6 +54,9 @@ func newApp() *cli.App {
 		if debug {
 			logrus.SetLevel(logrus.DebugLevel)
 		}
+		logrus.SetFormatter(&logrus.TextFormatter{
+			FullTimestamp: true,
+		})
 		return nil
 	}
 
