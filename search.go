@@ -70,6 +70,7 @@ func searchAction(c *cli.Context) error {
 		es.Search.WithSize(10000),
 		es.Search.WithScroll(m),
 		es.Search.WithSource("httpRequest.headers"),
+		es.Search.WithSort("_doc:asc"),
 	)
 	if err != nil {
 		return fmt.Errorf("Error getting response: %s", err)
@@ -368,6 +369,5 @@ const query = `{
         }
       ]
     }
-  },
-  "sort": {"_doc":"asc"}
+  }
 }`
