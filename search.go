@@ -40,6 +40,22 @@ var searchCommand = &cli.Command{
 			Aliases: []string{"q"},
 			Usage:   "Specify query json file",
 		},
+		&cli.TimestampFlag{
+			Name:     "since",
+			Required: false,
+			Layout:   "2006-01-02 15:04:05",
+			Value:    cli.NewTimestamp(time.Now().Add(-30 * time.Minute)),
+			Aliases:  []string{"S"},
+			Usage:    "Start showing entries on or newer than the specified date respectively.",
+		},
+		&cli.TimestampFlag{
+			Name:     "until",
+			Required: false,
+			Layout:   "2006-01-02 15:04:05",
+			Value:    cli.NewTimestamp(time.Now()),
+			Aliases:  []string{"U"},
+			Usage:    "Start showing entries on or older than the specified date, respectively.",
+		},
 	},
 }
 
@@ -55,8 +71,12 @@ func searchAction(c *cli.Context) error {
 
 	filename := c.String("query")
 	logrus.Debugf("filename: %s", filename)
+	since := c.Timestamp("since").Format(time.RFC3339Nano)
+	logrus.Debugf("since: %s", since)
+	until := c.Timestamp("until").Format(time.RFC3339Nano)
+	logrus.Debugf("until: %s", until)
 	m, _ := time.ParseDuration("5m")
-	query, err := buildQuery(filename)
+	query, err := buildQuery(filename, since, until)
 	logrus.Debugf("query: %s", query)
 	if err != nil {
 		return err
@@ -93,7 +113,7 @@ func searchAction(c *cli.Context) error {
 	var b bytes.Buffer
 	b.ReadFrom(res.Body)
 	total := gjson.GetBytes(b.Bytes(), "hits.total.value").Int()
-	logrus.Debugf("total hits: %v", total)
+	logrus.Infof("total hits: %v", total)
 	hits := int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
 	logrus.Debugf("hits: %v", hits)
 	took := gjson.GetBytes(b.Bytes(), "took").Int()
@@ -161,7 +181,7 @@ func searchAction(c *cli.Context) error {
 			hits = int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
 			took += gjson.GetBytes(b.Bytes(), "took").Int()
 			logrus.Debugf("hits: %v", hits)
-			logrus.Debugf("amplitude Id: %v", len(amplitudeIDs))
+			logrus.Infof("amplitude Id: %v", len(amplitudeIDs))
 			// in any case, only the most recently received _scroll_id should be used.
 			// See: https://www.elastic.co/guide/en/elasticsearch/reference/master/paginate-search-results.html#scroll-search-results
 			sid = gjson.GetBytes(b.Bytes(), "_scroll_id").String()
@@ -174,8 +194,8 @@ func searchAction(c *cli.Context) error {
 	}
 	fmt.Fprintf(w, "%v\n", string(out))
 
-	logrus.Debugf("amplitude Id count: %v", len(amplitudeIDs))
-	logrus.Debugf(
+	logrus.Infof("amplitude Id count: %v", len(amplitudeIDs))
+	logrus.Infof(
 		"[%s] %d hits; took: %dms\n",
 		res.Status(),
 		total,
@@ -205,7 +225,7 @@ func printAmplitudeIDSummary(amplitudeIDs []AmplitudeID) {
 		return userIDs[i].count < userIDs[j].count
 	})
 	for i, userID := range userIDs {
-		logrus.Debugf("%v: %v: %v", i+1, userID.uuid, userID.count)
+		logrus.Infof("%v: %v: %v", i+1, userID.uuid, userID.count)
 	}
 }
 
@@ -239,9 +259,11 @@ func trimNextEqual(s string) string {
 	return s[i+1:]
 }
 
-func buildQuery(filename string) (io.Reader, error) {
+func buildQuery(filename, since, until string) (io.Reader, error) {
 	if filename == "" {
-		return strings.NewReader(query), nil
+		var b strings.Builder
+		b.WriteString(fmt.Sprintf(query, since, until))
+		return strings.NewReader(b.String()), nil
 	}
 	logrus.Debugf("filename: %v", filename)
 	query, err := ioutil.ReadFile(filename)
@@ -361,8 +383,8 @@ const query = `{
         {
           "range": {
             "@timestamp": {
-              "gte": "2020-12-18T02:23:36.977Z",
-              "lte": "2020-12-25T02:23:36.977Z",
+              "gte": %q,
+              "lte": %q,
               "format": "strict_date_optional_time"
             }
           }

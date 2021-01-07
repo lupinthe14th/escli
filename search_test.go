@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestTrimNextEqual(t *testing.T) {
@@ -35,20 +36,25 @@ func TestBuildQuery(t *testing.T) {
 	const filename = "./testdata/search.json"
 	f, _ := ioutil.ReadFile(filename)
 	b := bytes.NewReader(f)
+	since := time.Now().Format(time.RFC3339Nano)
+	until := time.Now().Format(time.RFC3339Nano)
+	type in struct {
+		filename, since, until string
+	}
 	tests := []struct {
-		in      string
+		in      in
 		want    io.Reader
 		wantErr bool
 	}{
-		{in: "", want: strings.NewReader(query), wantErr: false},
-		{in: "err", want: nil, wantErr: true},
-		{in: filename, want: b, wantErr: false},
+		{in: in{filename: "", since: since, until: until}, want: strings.NewReader(fmt.Sprintf(query, since, until)), wantErr: false},
+		{in: in{filename: "err", since: since, until: until}, want: nil, wantErr: true},
+		{in: in{filename: filename, since: since, until: until}, want: b, wantErr: false},
 	}
 	for i, tt := range tests {
 		i, tt := i, tt
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			t.Parallel()
-			got, err := buildQuery(tt.in)
+			got, err := buildQuery(tt.in.filename, tt.in.since, tt.in.until)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("in: %v err: %v wantErr: %v", tt.in, err, tt.wantErr)
 			}
