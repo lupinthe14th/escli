@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cheggaaa/pb/v3"
 	"github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"github.com/urfave/cli/v2"
@@ -113,6 +114,7 @@ func searchAction(c *cli.Context) error {
 	var b bytes.Buffer
 	b.ReadFrom(res.Body)
 	total := gjson.GetBytes(b.Bytes(), "hits.total.value").Int()
+	bar := pb.Start64(total)
 	logrus.Infof("total hits: %v", total)
 	hits := int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
 	logrus.Debugf("hits: %v", hits)
@@ -123,6 +125,7 @@ func searchAction(c *cli.Context) error {
 	amplitudeIDs := make([]AmplitudeID, 0, hits)
 
 	for _, hit := range gjson.GetBytes(b.Bytes(), "hits.hits").Array() {
+		bar.Increment()
 		headers := gjson.Get(hit.Map()["_source"].String(), "httpRequest.headers").Array()
 		for _, header := range headers {
 			if header.Map()["name"].Str == "cookie" {
@@ -164,6 +167,7 @@ func searchAction(c *cli.Context) error {
 			var b bytes.Buffer
 			b.ReadFrom(res.Body)
 			for _, hit := range gjson.GetBytes(b.Bytes(), "hits.hits").Array() {
+				bar.Increment()
 				headers := gjson.Get(hit.Map()["_source"].String(), "httpRequest.headers").Array()
 				for _, header := range headers {
 					if header.Map()["name"].Str == "cookie" {
@@ -181,13 +185,14 @@ func searchAction(c *cli.Context) error {
 			hits = int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
 			took += gjson.GetBytes(b.Bytes(), "took").Int()
 			logrus.Debugf("hits: %v", hits)
-			logrus.Infof("amplitude Id: %v", len(amplitudeIDs))
+			logrus.Debugf("amplitude Id: %v", len(amplitudeIDs))
 			// in any case, only the most recently received _scroll_id should be used.
 			// See: https://www.elastic.co/guide/en/elasticsearch/reference/master/paginate-search-results.html#scroll-search-results
 			sid = gjson.GetBytes(b.Bytes(), "_scroll_id").String()
 			logrus.Debugf("sid: %v", sid)
 		}
 	}
+	bar.Finish()
 	out, err := json.Marshal(&amplitudeIDs)
 	if err != nil {
 		return err
