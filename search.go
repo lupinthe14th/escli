@@ -57,6 +57,13 @@ var searchCommand = &cli.Command{
 			Aliases:  []string{"U"},
 			Usage:    "Start showing entries on or older than the specified date, respectively.",
 		},
+		&cli.BoolFlag{
+			Name:     "print",
+			Required: false,
+			Value:    false,
+			Aliases:  []string{"P"},
+			Usage:    "Print Amplitude ID Summary.",
+		},
 	},
 }
 
@@ -144,12 +151,14 @@ func searchAction(c *cli.Context) error {
 	if total > hits {
 		for hits > 0 {
 			res, err := es.Scroll(
+				es.Scroll.WithContext(context.Background()),
 				es.Scroll.WithScrollID(sid),
 				es.Scroll.WithScroll(m),
 			)
 			if err != nil {
 				return fmt.Errorf("Error getting response: %s", err)
 			}
+			defer res.Body.Close()
 
 			if res.IsError() {
 				var e map[string]interface{}
@@ -206,7 +215,9 @@ func searchAction(c *cli.Context) error {
 		total,
 		took,
 	)
-	printAmplitudeIDSummary(amplitudeIDs)
+	if c.Bool("print") {
+		printAmplitudeIDSummary(amplitudeIDs)
+	}
 	return nil
 }
 
