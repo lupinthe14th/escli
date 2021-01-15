@@ -2,13 +2,15 @@ package main
 
 import (
 	"bytes"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"reflect"
 	"strings"
 	"testing"
-	"time"
+
+	"github.com/urfave/cli/v2"
 )
 
 func TestTrimNextEqual(t *testing.T) {
@@ -36,8 +38,8 @@ func TestBuildQuery(t *testing.T) {
 	const filename = "./testdata/search.json"
 	f, _ := ioutil.ReadFile(filename)
 	b := bytes.NewReader(f)
-	since := time.Now().Format(time.RFC3339Nano)
-	until := time.Now().Format(time.RFC3339Nano)
+	since := "2020-12-23 13:04:05"
+	until := "2020-12-23 14:15:16"
 	type in struct {
 		filename, since, until string
 	}
@@ -46,7 +48,7 @@ func TestBuildQuery(t *testing.T) {
 		want    io.Reader
 		wantErr bool
 	}{
-		{in: in{filename: "", since: since, until: until}, want: strings.NewReader(fmt.Sprintf(query, since, until)), wantErr: false},
+		{in: in{filename: "", since: since, until: until}, want: strings.NewReader(fmt.Sprintf(MATCH_ALL_QUERY, "2020-12-23T13:04:05Z", "2020-12-23T14:15:16Z")), wantErr: false},
 		{in: in{filename: "err", since: since, until: until}, want: nil, wantErr: true},
 		{in: in{filename: filename, since: since, until: until}, want: b, wantErr: false},
 	}
@@ -54,7 +56,18 @@ func TestBuildQuery(t *testing.T) {
 		i, tt := i, tt
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			t.Parallel()
-			got, err := buildQuery(tt.in.filename, tt.in.since, tt.in.until)
+			flags := []cli.Flag{
+				&cli.StringFlag{Name: "query", Aliases: []string{"q"}},
+				&cli.TimestampFlag{Name: "since", Aliases: []string{"s"}, Layout: "2006-01-02 15:04:05"},
+				&cli.TimestampFlag{Name: "until", Aliases: []string{"u"}, Layout: "2006-01-02 15:04:05"},
+			}
+			set := flag.NewFlagSet("test", 0)
+			for _, fl := range flags {
+				_ = fl.Apply(set)
+			}
+			set.Parse([]string{"--query", tt.in.filename, "--since", tt.in.since, "--until", tt.in.until})
+			c := cli.NewContext(nil, set, nil)
+			got, err := buildQuery(c)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("in: %v err: %v wantErr: %v", tt.in, err, tt.wantErr)
 			}
