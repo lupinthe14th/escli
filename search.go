@@ -36,10 +36,22 @@ var searchCommand = &cli.Command{
 	Action: searchAction,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
+			Name:    "all",
+			Value:   "",
+			Aliases: []string{"a"},
+			Usage:   "Show match all",
+		},
+		&cli.StringFlag{
 			Name:    "query",
 			Value:   "",
 			Aliases: []string{"q"},
 			Usage:   "Specify query json file",
+		},
+		&cli.StringFlag{
+			Name:    "rule",
+			Value:   "",
+			Aliases: []string{"r"},
+			Usage:   "Specify rule group",
 		},
 		&cli.TimestampFlag{
 			Name:     "since",
@@ -68,28 +80,19 @@ var searchCommand = &cli.Command{
 }
 
 func searchAction(c *cli.Context) error {
-	// Search for the indexed documents
-	//
-	// Build the request body.
 	w := c.App.Writer
 	es, err := newClient(c)
 	if err != nil {
 		return err
 	}
 
-	filename := c.String("query")
-	logrus.Debugf("filename: %s", filename)
-	since := c.Timestamp("since").Format(time.RFC3339Nano)
-	logrus.Debugf("since: %s", since)
-	until := c.Timestamp("until").Format(time.RFC3339Nano)
-	logrus.Debugf("until: %s", until)
 	m, _ := time.ParseDuration("5m")
-	query, err := buildQuery(filename, since, until)
+	query, err := buildQuery(c)
 	logrus.Debugf("query: %s", query)
 	if err != nil {
 		return err
 	}
-	// Perform the search request.
+
 	res, err := es.Search(
 		es.Search.WithContext(context.Background()),
 		es.Search.WithIndex("log-aws-waf-*"),
@@ -275,13 +278,25 @@ func trimNextEqual(s string) string {
 	return s[i+1:]
 }
 
-func buildQuery(filename, since, until string) (io.Reader, error) {
+func buildQuery(c *cli.Context) (io.Reader, error) {
+	filename := c.String("query")
+	logrus.Debugf("filename: %s", filename)
+	since := c.Timestamp("since").Format(time.RFC3339Nano)
+	logrus.Debugf("since: %s", since)
+	until := c.Timestamp("until").Format(time.RFC3339Nano)
+	logrus.Debugf("until: %s", until)
 	if filename == "" {
 		var b strings.Builder
-		b.WriteString(fmt.Sprintf(query, since, until))
+		switch c.String("rule") {
+		case "AmazonIpReputation":
+			b.WriteString(fmt.Sprintf(AMAZON_IP_REPUTATION_QUERY, since, until))
+		case "AnonymousIP":
+			b.WriteString(fmt.Sprintf(ANONYMOUS_IP_QUERY, since, until))
+		default:
+			b.WriteString(fmt.Sprintf(MATCH_ALL_QUERY, since, until))
+		}
 		return strings.NewReader(b.String()), nil
 	}
-	logrus.Debugf("filename: %v", filename)
 	query, err := ioutil.ReadFile(filename)
 	logrus.Debugf("query: %v", query)
 	if err != nil {
@@ -290,7 +305,89 @@ func buildQuery(filename, since, until string) (io.Reader, error) {
 	return bytes.NewReader(query), nil
 }
 
-const query = `{
+const AMAZON_IP_REPUTATION_QUERY = `{
+  "query": {
+    "bool": {
+      "must": [],
+      "filter": [
+        {
+          "bool": {
+            "filter": [
+              {
+                "bool": {
+                  "must_not": {
+                    "bool": {
+                      "should": [
+                        {
+                          "match": {
+                            "ruleGroupList.terminatingRule.ruleId": "HostingProviderIPList"
+                          }
+                        }
+                      ],
+                      "minimum_should_match": 1
+                    }
+                  }
+                }
+              },
+              {
+                "bool": {
+                  "filter": [
+                    {
+                      "bool": {
+                        "should": [
+                          {
+                            "match": {
+                              "ruleGroupList.terminatingRule.action": "BLOCK"
+                            }
+                          }
+                        ],
+                        "minimum_should_match": 1
+                      }
+                    },
+                    {
+                      "bool": {
+                        "should": [
+                          {
+                            "query_string": {
+                              "fields": [
+                                "ruleGroupList.terminatingRule.ruleId"
+                              ],
+                              "query": "AWSManagedIPReputationList_*"
+                            }
+                          }
+                        ],
+                        "minimum_should_match": 1
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "match_all": {}
+        },
+        {
+          "match_phrase": {
+            "rule.ruleset": "wafv2-linux"
+          }
+        },
+        {
+          "range": {
+            "@timestamp": {
+              "gte": %q,
+              "lte": %q,
+              "format": "strict_date_optional_time"
+            }
+          }
+        }
+      ]
+    }
+  }
+}`
+
+const ANONYMOUS_IP_QUERY = `{
   "query": {
     "bool": {
       "must": [
@@ -347,40 +444,6 @@ const query = `{
                               ],
                               "minimum_should_match": 1
                             }
-                          },
-                          {
-                            "bool": {
-                              "filter": [
-                                {
-                                  "bool": {
-                                    "should": [
-                                      {
-                                        "range": {
-                                          "httpRequest.clientIp": {
-                                            "gte": "103.208.220.0"
-                                          }
-                                        }
-                                      }
-                                    ],
-                                    "minimum_should_match": 1
-                                  }
-                                },
-                                {
-                                  "bool": {
-                                    "should": [
-                                      {
-                                        "range": {
-                                          "httpRequest.clientIp": {
-                                            "lte": "103.208.223.255"
-                                          }
-                                        }
-                                      }
-                                    ],
-                                    "minimum_should_match": 1
-                                  }
-                                }
-                              ]
-                            }
                           }
                         ]
                       }
@@ -396,6 +459,29 @@ const query = `{
             "rule.ruleset": "wafv2-linux"
           }
         },
+        {
+          "range": {
+            "@timestamp": {
+              "gte": %q,
+              "lte": %q,
+              "format": "strict_date_optional_time"
+            }
+          }
+        }
+      ]
+    }
+  }
+}`
+
+const MATCH_ALL_QUERY = `{
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "match_all": {}
+        }
+      ],
+      "filter": [
         {
           "range": {
             "@timestamp": {
