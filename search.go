@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cheggaaa/pb/v3"
 	"github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 	"github.com/urfave/cli/v2"
@@ -35,73 +36,106 @@ var searchCommand = &cli.Command{
 	Action: searchAction,
 	Flags: []cli.Flag{
 		&cli.StringFlag{
+			Name:    "all",
+			Value:   "",
+			Aliases: []string{"a"},
+			Usage:   "Show match all",
+		},
+		&cli.StringFlag{
 			Name:    "query",
 			Value:   "",
 			Aliases: []string{"q"},
 			Usage:   "Specify query json file",
 		},
+		&cli.StringFlag{
+			Name:    "rule",
+			Value:   "",
+			Aliases: []string{"r"},
+			Usage:   "Specify rule group",
+		},
+		&cli.TimestampFlag{
+			Name:     "since",
+			Required: false,
+			Layout:   "2006-01-02 15:04:05",
+			Value:    cli.NewTimestamp(time.Now().Add(-30 * time.Minute)),
+			Aliases:  []string{"S"},
+			Usage:    "Start showing entries on or newer than the specified date respectively.",
+		},
+		&cli.TimestampFlag{
+			Name:     "until",
+			Required: false,
+			Layout:   "2006-01-02 15:04:05",
+			Value:    cli.NewTimestamp(time.Now()),
+			Aliases:  []string{"U"},
+			Usage:    "Start showing entries on or older than the specified date, respectively.",
+		},
+		&cli.BoolFlag{
+			Name:     "print",
+			Required: false,
+			Value:    false,
+			Aliases:  []string{"P"},
+			Usage:    "Print Amplitude ID Summary.",
+		},
 	},
 }
 
 func searchAction(c *cli.Context) error {
-	// Search for the indexed documents
-	//
-	// Build the request body.
 	w := c.App.Writer
 	es, err := newClient(c)
 	if err != nil {
 		return err
 	}
 
-	filename := c.String("query")
-	logrus.Debugf("filename: %s", filename)
 	m, _ := time.ParseDuration("5m")
-	query, err := buildQuery(filename)
+	query, err := buildQuery(c)
 	logrus.Debugf("query: %s", query)
 	if err != nil {
 		return err
 	}
-	// Perform the search request.
-	page, err := es.Search(
+
+	res, err := es.Search(
 		es.Search.WithContext(context.Background()),
 		es.Search.WithIndex("log-aws-waf-*"),
 		es.Search.WithBody(query),
 		es.Search.WithPretty(),
 		es.Search.WithSize(10000),
 		es.Search.WithScroll(m),
-		es.Search.WithSearchType("dfs_query_then_fetch"),
 		es.Search.WithSource("httpRequest.headers"),
+		es.Search.WithSort("_doc:asc"),
 	)
 	if err != nil {
 		return fmt.Errorf("Error getting response: %s", err)
 	}
-	defer page.Body.Close()
+	defer res.Body.Close()
 
-	if page.IsError() {
+	if res.IsError() {
 		var e map[string]interface{}
-		if err := json.NewDecoder(page.Body).Decode(&e); err != nil {
+		if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
 			return fmt.Errorf("Error parsing the response body: %s", err)
 		}
 		// Print the response status and error information.
 		return fmt.Errorf("[%s] %s: %s",
-			page.Status(),
+			res.Status(),
 			e["error"].(map[string]interface{})["type"],
 			e["error"].(map[string]interface{})["reason"],
 		)
 	}
 
 	var b bytes.Buffer
-	b.ReadFrom(page.Body)
+	b.ReadFrom(res.Body)
 	total := gjson.GetBytes(b.Bytes(), "hits.total.value").Int()
-	scrollSize := total
-	logrus.Debugf("scroll size: %v", scrollSize)
+	bar := pb.Start64(total)
+	logrus.Infof("total hits: %v", total)
+	hits := int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
+	logrus.Debugf("hits: %v", hits)
 	took := gjson.GetBytes(b.Bytes(), "took").Int()
 	sid := gjson.GetBytes(b.Bytes(), "_scroll_id").String()
 	logrus.Debugf("sid: %v", sid)
 
-	amplitudeIDs := make([]AmplitudeID, 0, scrollSize)
+	amplitudeIDs := make([]AmplitudeID, 0, hits)
 
 	for _, hit := range gjson.GetBytes(b.Bytes(), "hits.hits").Array() {
+		bar.Increment()
 		headers := gjson.Get(hit.Map()["_source"].String(), "httpRequest.headers").Array()
 		for _, header := range headers {
 			if header.Map()["name"].Str == "cookie" {
@@ -117,65 +151,76 @@ func searchAction(c *cli.Context) error {
 		}
 	}
 
-	for scrollSize > 0 {
-		res, err := es.Scroll(
-			es.Scroll.WithScrollID(sid),
-			es.Scroll.WithScroll(m),
-		)
-		if err != nil {
-			return fmt.Errorf("Error getting response: %s", err)
-		}
-		defer res.Body.Close()
-
-		if res.IsError() {
-			var e map[string]interface{}
-			if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
-				return fmt.Errorf("Error parsing the response body: %s", err)
-			}
-			// Print the response status and error information.
-			return fmt.Errorf("[%s] %s: %s",
-				res.Status(),
-				e["error"].(map[string]interface{})["type"],
-				e["error"].(map[string]interface{})["reason"],
+	if total > hits {
+		for hits > 0 {
+			res, err := es.Scroll(
+				es.Scroll.WithContext(context.Background()),
+				es.Scroll.WithScrollID(sid),
+				es.Scroll.WithScroll(m),
 			)
-		}
+			if err != nil {
+				return fmt.Errorf("Error getting response: %s", err)
+			}
+			defer res.Body.Close()
 
-		var buf bytes.Buffer
-		buf.ReadFrom(res.Body)
-		for _, hit := range gjson.GetBytes(buf.Bytes(), "hits.hits").Array() {
-			headers := gjson.Get(hit.Map()["_source"].String(), "httpRequest.headers").Array()
-			for _, header := range headers {
-				if header.Map()["name"].Str == "cookie" {
-					cookie := header.Map()["value"].Str
-					amplitudeID, err := cookieToAmplitudeID(cookie)
-					if err != nil {
-						return err
-					}
-					if amplitudeID != (AmplitudeID{}) {
-						amplitudeIDs = append(amplitudeIDs, amplitudeID)
+			if res.IsError() {
+				var e map[string]interface{}
+				if err := json.NewDecoder(res.Body).Decode(&e); err != nil {
+					return fmt.Errorf("Error parsing the response body: %s", err)
+				}
+				// Print the response status and error information.
+				return fmt.Errorf("[%s] %s: %s",
+					res.Status(),
+					e["error"].(map[string]interface{})["type"],
+					e["error"].(map[string]interface{})["reason"],
+				)
+			}
+
+			var b bytes.Buffer
+			b.ReadFrom(res.Body)
+			for _, hit := range gjson.GetBytes(b.Bytes(), "hits.hits").Array() {
+				bar.Increment()
+				headers := gjson.Get(hit.Map()["_source"].String(), "httpRequest.headers").Array()
+				for _, header := range headers {
+					if header.Map()["name"].Str == "cookie" {
+						cookie := header.Map()["value"].Str
+						amplitudeID, err := cookieToAmplitudeID(cookie)
+						if err != nil {
+							return err
+						}
+						if amplitudeID != (AmplitudeID{}) {
+							amplitudeIDs = append(amplitudeIDs, amplitudeID)
+						}
 					}
 				}
 			}
+			hits = int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
+			took += gjson.GetBytes(b.Bytes(), "took").Int()
+			logrus.Debugf("hits: %v", hits)
+			logrus.Debugf("amplitude Id: %v", len(amplitudeIDs))
+			// in any case, only the most recently received _scroll_id should be used.
+			// See: https://www.elastic.co/guide/en/elasticsearch/reference/master/paginate-search-results.html#scroll-search-results
+			sid = gjson.GetBytes(b.Bytes(), "_scroll_id").String()
+			logrus.Debugf("sid: %v", sid)
 		}
-		scrollSize = int64(len(gjson.GetBytes(buf.Bytes(), "hits.hits").Array()))
-		took += gjson.GetBytes(buf.Bytes(), "took").Int()
-		logrus.Debugf("scroll size: %v", scrollSize)
-		logrus.Debugf("amplitude Id: %v", len(amplitudeIDs))
 	}
+	bar.Finish()
 	out, err := json.Marshal(&amplitudeIDs)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "%v\n", string(out))
 
-	logrus.Debugf("amplitude Id count: %v", len(amplitudeIDs))
-	logrus.Debugf(
+	logrus.Infof("amplitude Id count: %v", len(amplitudeIDs))
+	logrus.Infof(
 		"[%s] %d hits; took: %dms\n",
-		page.Status(),
+		res.Status(),
 		total,
 		took,
 	)
-	printAmplitudeIDSummary(amplitudeIDs)
+	if c.Bool("print") {
+		printAmplitudeIDSummary(amplitudeIDs)
+	}
 	return nil
 }
 
@@ -199,7 +244,7 @@ func printAmplitudeIDSummary(amplitudeIDs []AmplitudeID) {
 		return userIDs[i].count < userIDs[j].count
 	})
 	for i, userID := range userIDs {
-		logrus.Debugf("%v: %v:%v", i, userID.uuid, userID.count)
+		logrus.Infof("%v: %v: %v", i+1, userID.uuid, userID.count)
 	}
 }
 
@@ -233,11 +278,25 @@ func trimNextEqual(s string) string {
 	return s[i+1:]
 }
 
-func buildQuery(filename string) (io.Reader, error) {
+func buildQuery(c *cli.Context) (io.Reader, error) {
+	filename := c.String("query")
+	logrus.Debugf("filename: %s", filename)
+	since := c.Timestamp("since").Format(time.RFC3339Nano)
+	logrus.Debugf("since: %s", since)
+	until := c.Timestamp("until").Format(time.RFC3339Nano)
+	logrus.Debugf("until: %s", until)
 	if filename == "" {
-		return strings.NewReader(query), nil
+		var b strings.Builder
+		switch c.String("rule") {
+		case "AmazonIpReputation":
+			b.WriteString(fmt.Sprintf(AMAZON_IP_REPUTATION_QUERY, since, until))
+		case "AnonymousIP":
+			b.WriteString(fmt.Sprintf(ANONYMOUS_IP_QUERY, since, until))
+		default:
+			b.WriteString(fmt.Sprintf(MATCH_ALL_QUERY, since, until))
+		}
+		return strings.NewReader(b.String()), nil
 	}
-	logrus.Debugf("filename: %v", filename)
 	query, err := ioutil.ReadFile(filename)
 	logrus.Debugf("query: %v", query)
 	if err != nil {
@@ -246,7 +305,89 @@ func buildQuery(filename string) (io.Reader, error) {
 	return bytes.NewReader(query), nil
 }
 
-const query = `{
+const AMAZON_IP_REPUTATION_QUERY = `{
+  "query": {
+    "bool": {
+      "must": [],
+      "filter": [
+        {
+          "bool": {
+            "filter": [
+              {
+                "bool": {
+                  "must_not": {
+                    "bool": {
+                      "should": [
+                        {
+                          "match": {
+                            "ruleGroupList.terminatingRule.ruleId": "HostingProviderIPList"
+                          }
+                        }
+                      ],
+                      "minimum_should_match": 1
+                    }
+                  }
+                }
+              },
+              {
+                "bool": {
+                  "filter": [
+                    {
+                      "bool": {
+                        "should": [
+                          {
+                            "match": {
+                              "ruleGroupList.terminatingRule.action": "BLOCK"
+                            }
+                          }
+                        ],
+                        "minimum_should_match": 1
+                      }
+                    },
+                    {
+                      "bool": {
+                        "should": [
+                          {
+                            "query_string": {
+                              "fields": [
+                                "ruleGroupList.terminatingRule.ruleId"
+                              ],
+                              "query": "AWSManagedIPReputationList_*"
+                            }
+                          }
+                        ],
+                        "minimum_should_match": 1
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        },
+        {
+          "match_all": {}
+        },
+        {
+          "match_phrase": {
+            "rule.ruleset": "wafv2-linux"
+          }
+        },
+        {
+          "range": {
+            "@timestamp": {
+              "gte": %q,
+              "lte": %q,
+              "format": "strict_date_optional_time"
+            }
+          }
+        }
+      ]
+    }
+  }
+}`
+
+const ANONYMOUS_IP_QUERY = `{
   "query": {
     "bool": {
       "must": [
@@ -303,40 +444,6 @@ const query = `{
                               ],
                               "minimum_should_match": 1
                             }
-                          },
-                          {
-                            "bool": {
-                              "filter": [
-                                {
-                                  "bool": {
-                                    "should": [
-                                      {
-                                        "range": {
-                                          "httpRequest.clientIp": {
-                                            "gte": "103.208.220.0"
-                                          }
-                                        }
-                                      }
-                                    ],
-                                    "minimum_should_match": 1
-                                  }
-                                },
-                                {
-                                  "bool": {
-                                    "should": [
-                                      {
-                                        "range": {
-                                          "httpRequest.clientIp": {
-                                            "lte": "103.208.223.255"
-                                          }
-                                        }
-                                      }
-                                    ],
-                                    "minimum_should_match": 1
-                                  }
-                                }
-                              ]
-                            }
                           }
                         ]
                       }
@@ -355,14 +462,36 @@ const query = `{
         {
           "range": {
             "@timestamp": {
-              "gte": "2020-12-18T02:23:36.977Z",
-              "lte": "2020-12-25T02:23:36.977Z",
+              "gte": %q,
+              "lte": %q,
               "format": "strict_date_optional_time"
             }
           }
         }
       ]
     }
-  },
-  "sort": {"_doc":"asc"}
+  }
+}`
+
+const MATCH_ALL_QUERY = `{
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "match_all": {}
+        }
+      ],
+      "filter": [
+        {
+          "range": {
+            "@timestamp": {
+              "gte": %q,
+              "lte": %q,
+              "format": "strict_date_optional_time"
+            }
+          }
+        }
+      ]
+    }
+  }
 }`

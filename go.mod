@@ -3,6 +3,7 @@ module github.com/lupinthe14th/escli
 go 1.14
 
 require (
+	github.com/cheggaaa/pb/v3 v3.0.5
 	github.com/cpuguy83/go-md2man/v2 v2.0.0 // indirect
 	github.com/elastic/go-elasticsearch/v8 v8.0.0-20201216152027-57cb70149147
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
