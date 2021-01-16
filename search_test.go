@@ -41,7 +41,7 @@ func TestBuildQuery(t *testing.T) {
 	since := "2020-12-23 13:04:05"
 	until := "2020-12-23 14:15:16"
 	type in struct {
-		filename, since, until string
+		filename, rule, since, until string
 	}
 	tests := []struct {
 		in      in
@@ -51,6 +51,8 @@ func TestBuildQuery(t *testing.T) {
 		{in: in{filename: "", since: since, until: until}, want: strings.NewReader(fmt.Sprintf(MatchAllQuery, "2020-12-23T13:04:05Z", "2020-12-23T14:15:16Z")), wantErr: false},
 		{in: in{filename: "err", since: since, until: until}, want: nil, wantErr: true},
 		{in: in{filename: filename, since: since, until: until}, want: b, wantErr: false},
+		{in: in{rule: "AmazonIpReputation", since: since, until: until}, want: strings.NewReader(fmt.Sprintf(AmazonIPReputationQuery, "2020-12-23T13:04:05Z", "2020-12-23T14:15:16Z")), wantErr: false},
+		{in: in{rule: "AnonymousIP", since: since, until: until}, want: strings.NewReader(fmt.Sprintf(AnonymousIPQuery, "2020-12-23T13:04:05Z", "2020-12-23T14:15:16Z")), wantErr: false},
 	}
 	for i, tt := range tests {
 		i, tt := i, tt
@@ -58,6 +60,7 @@ func TestBuildQuery(t *testing.T) {
 			t.Parallel()
 			flags := []cli.Flag{
 				&cli.StringFlag{Name: "query", Aliases: []string{"q"}},
+				&cli.StringFlag{Name: "rule", Aliases: []string{"r"}},
 				&cli.TimestampFlag{Name: "since", Aliases: []string{"s"}, Layout: "2006-01-02 15:04:05"},
 				&cli.TimestampFlag{Name: "until", Aliases: []string{"u"}, Layout: "2006-01-02 15:04:05"},
 			}
@@ -65,7 +68,7 @@ func TestBuildQuery(t *testing.T) {
 			for _, fl := range flags {
 				_ = fl.Apply(set)
 			}
-			set.Parse([]string{"--query", tt.in.filename, "--since", tt.in.since, "--until", tt.in.until})
+			set.Parse([]string{"--query", tt.in.filename, "--rule", tt.in.rule, "--since", tt.in.since, "--until", tt.in.until})
 			c := cli.NewContext(nil, set, nil)
 			got, err := buildQuery(c)
 			if (err != nil) != tt.wantErr {
