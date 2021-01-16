@@ -42,9 +42,9 @@ var searchCommand = &cli.Command{
 			Usage:   "Show match all",
 		},
 		&cli.StringFlag{
-			Name:    "query",
+			Name:    "filename",
 			Value:   "",
-			Aliases: []string{"q"},
+			Aliases: []string{"f"},
 			Usage:   "Specify query json file",
 		},
 		&cli.StringFlag{
@@ -279,7 +279,7 @@ func trimNextEqual(s string) string {
 }
 
 func buildQuery(c *cli.Context) (io.Reader, error) {
-	filename := c.String("query")
+	filename := c.String("filename")
 	log.Debug().Msgf("filename: %s", filename)
 	since := c.Timestamp("since").Format(time.RFC3339Nano)
 	log.Debug().Msgf("since: %s", since)

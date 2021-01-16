@@ -59,16 +59,16 @@ func TestBuildQuery(t *testing.T) {
 		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			t.Parallel()
 			flags := []cli.Flag{
-				&cli.StringFlag{Name: "query", Aliases: []string{"q"}},
-				&cli.StringFlag{Name: "rule", Aliases: []string{"r"}},
-				&cli.TimestampFlag{Name: "since", Aliases: []string{"s"}, Layout: "2006-01-02 15:04:05"},
-				&cli.TimestampFlag{Name: "until", Aliases: []string{"u"}, Layout: "2006-01-02 15:04:05"},
+				&cli.StringFlag{Name: "filename"},
+				&cli.StringFlag{Name: "rule"},
+				&cli.TimestampFlag{Name: "since", Layout: "2006-01-02 15:04:05"},
+				&cli.TimestampFlag{Name: "until", Layout: "2006-01-02 15:04:05"},
 			}
 			set := flag.NewFlagSet("test", 0)
 			for _, fl := range flags {
 				_ = fl.Apply(set)
 			}
-			set.Parse([]string{"--query", tt.in.filename, "--rule", tt.in.rule, "--since", tt.in.since, "--until", tt.in.until})
+			set.Parse([]string{"--filename", tt.in.filename, "--rule", tt.in.rule, "--since", tt.in.since, "--until", tt.in.until})
 			c := cli.NewContext(nil, set, nil)
 			got, err := buildQuery(c)
 			if (err != nil) != tt.wantErr {
