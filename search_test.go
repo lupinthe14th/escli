@@ -48,7 +48,7 @@ func TestBuildQuery(t *testing.T) {
 		want    io.Reader
 		wantErr bool
 	}{
-		{in: in{filename: "", since: since, until: until}, want: strings.NewReader(fmt.Sprintf(MATCH_ALL_QUERY, "2020-12-23T13:04:05Z", "2020-12-23T14:15:16Z")), wantErr: false},
+		{in: in{filename: "", since: since, until: until}, want: strings.NewReader(fmt.Sprintf(MatchAllQuery, "2020-12-23T13:04:05Z", "2020-12-23T14:15:16Z")), wantErr: false},
 		{in: in{filename: "err", since: since, until: until}, want: nil, wantErr: true},
 		{in: in{filename: filename, since: since, until: until}, want: b, wantErr: false},
 	}

@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/cheggaaa/pb/v3"
-	"github.com/sirupsen/logrus"
+	"github.com/rs/zerolog/log"
 	"github.com/tidwall/gjson"
 	"github.com/urfave/cli/v2"
 )
@@ -88,7 +88,7 @@ func searchAction(c *cli.Context) error {
 
 	m, _ := time.ParseDuration("5m")
 	query, err := buildQuery(c)
-	logrus.Debugf("query: %s", query)
+	log.Debug().Msgf("query: %s", query)
 	if err != nil {
 		return err
 	}
@@ -125,12 +125,12 @@ func searchAction(c *cli.Context) error {
 	b.ReadFrom(res.Body)
 	total := gjson.GetBytes(b.Bytes(), "hits.total.value").Int()
 	bar := pb.Start64(total)
-	logrus.Infof("total hits: %v", total)
+	log.Debug().Msgf("total hits: %v", total)
 	hits := int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
-	logrus.Debugf("hits: %v", hits)
+	log.Debug().Msgf("hits: %v", hits)
 	took := gjson.GetBytes(b.Bytes(), "took").Int()
 	sid := gjson.GetBytes(b.Bytes(), "_scroll_id").String()
-	logrus.Debugf("sid: %v", sid)
+	log.Debug().Msgf("sid: %v", sid)
 
 	amplitudeIDs := make([]AmplitudeID, 0, hits)
 
@@ -196,12 +196,12 @@ func searchAction(c *cli.Context) error {
 			}
 			hits = int64(len(gjson.GetBytes(b.Bytes(), "hits.hits").Array()))
 			took += gjson.GetBytes(b.Bytes(), "took").Int()
-			logrus.Debugf("hits: %v", hits)
-			logrus.Debugf("amplitude Id: %v", len(amplitudeIDs))
+			log.Debug().Msgf("hits: %v", hits)
+			log.Debug().Msgf("amplitude Id: %v", len(amplitudeIDs))
 			// in any case, only the most recently received _scroll_id should be used.
 			// See: https://www.elastic.co/guide/en/elasticsearch/reference/master/paginate-search-results.html#scroll-search-results
 			sid = gjson.GetBytes(b.Bytes(), "_scroll_id").String()
-			logrus.Debugf("sid: %v", sid)
+			log.Debug().Msgf("sid: %v", sid)
 		}
 	}
 	bar.Finish()
@@ -211,8 +211,8 @@ func searchAction(c *cli.Context) error {
 	}
 	fmt.Fprintf(w, "%v\n", string(out))
 
-	logrus.Infof("amplitude Id count: %v", len(amplitudeIDs))
-	logrus.Infof(
+	log.Debug().Msgf("amplitude Id count: %v", len(amplitudeIDs))
+	log.Debug().Msgf(
 		"[%s] %d hits; took: %dms\n",
 		res.Status(),
 		total,
@@ -244,7 +244,7 @@ func printAmplitudeIDSummary(amplitudeIDs []AmplitudeID) {
 		return userIDs[i].count < userIDs[j].count
 	})
 	for i, userID := range userIDs {
-		logrus.Infof("%v: %v: %v", i+1, userID.uuid, userID.count)
+		log.Debug().Msgf("%v: %v: %v", i+1, userID.uuid, userID.count)
 	}
 }
 
@@ -280,32 +280,34 @@ func trimNextEqual(s string) string {
 
 func buildQuery(c *cli.Context) (io.Reader, error) {
 	filename := c.String("query")
-	logrus.Debugf("filename: %s", filename)
+	log.Debug().Msgf("filename: %s", filename)
 	since := c.Timestamp("since").Format(time.RFC3339Nano)
-	logrus.Debugf("since: %s", since)
+	log.Debug().Msgf("since: %s", since)
 	until := c.Timestamp("until").Format(time.RFC3339Nano)
-	logrus.Debugf("until: %s", until)
+	log.Debug().Msgf("until: %s", until)
 	if filename == "" {
 		var b strings.Builder
 		switch c.String("rule") {
 		case "AmazonIpReputation":
-			b.WriteString(fmt.Sprintf(AMAZON_IP_REPUTATION_QUERY, since, until))
+			b.WriteString(fmt.Sprintf(AmazonIPReputationQuery, since, until))
 		case "AnonymousIP":
-			b.WriteString(fmt.Sprintf(ANONYMOUS_IP_QUERY, since, until))
+			b.WriteString(fmt.Sprintf(AnonymousIPQuery, since, until))
 		default:
-			b.WriteString(fmt.Sprintf(MATCH_ALL_QUERY, since, until))
+			b.WriteString(fmt.Sprintf(MatchAllQuery, since, until))
 		}
 		return strings.NewReader(b.String()), nil
 	}
 	query, err := ioutil.ReadFile(filename)
-	logrus.Debugf("query: %v", query)
+	log.Debug().Msgf("query: %v", query)
 	if err != nil {
 		return nil, err
 	}
 	return bytes.NewReader(query), nil
 }
 
-const AMAZON_IP_REPUTATION_QUERY = `{
+// AmazonIPReputationQuery is a query string that match Amazon IP Reputation List Rule Group.
+// If the time is not specified, the number of matches becomes large, so it is specified separately.
+const AmazonIPReputationQuery = `{
   "query": {
     "bool": {
       "must": [],
@@ -387,7 +389,9 @@ const AMAZON_IP_REPUTATION_QUERY = `{
   }
 }`
 
-const ANONYMOUS_IP_QUERY = `{
+// AnonymousIPQuery is a query string that match Anonymous IP List Rule Group.
+// If the time is not specified, the number of matches becomes large, so it is specified separately.
+const AnonymousIPQuery = `{
   "query": {
     "bool": {
       "must": [
@@ -473,7 +477,9 @@ const ANONYMOUS_IP_QUERY = `{
   }
 }`
 
-const MATCH_ALL_QUERY = `{
+// MatchAllQuery is a query string that matches all.
+// If the time is not specified, the number of matches becomes large, so it is specified separately.
+const MatchAllQuery = `{
   "query": {
     "bool": {
       "must": [
