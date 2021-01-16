@@ -205,11 +205,13 @@ func searchAction(c *cli.Context) error {
 		}
 	}
 	bar.Finish()
-	out, err := json.Marshal(&amplitudeIDs)
-	if err != nil {
-		return err
+	if len(amplitudeIDs) > 0 {
+		out, err := json.Marshal(&amplitudeIDs)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "%v\n", string(out))
 	}
-	fmt.Fprintf(w, "%v\n", string(out))
 
 	log.Debug().Msgf("amplitude Id count: %v", len(amplitudeIDs))
 	log.Debug().Msgf(
