@@ -215,7 +215,7 @@ func searchAction(c *cli.Context) error {
 
 	log.Debug().Msgf("amplitude Id count: %v", len(amplitudeIDs))
 	log.Debug().Msgf(
-		"[%s] %d hits; took: %dms\n",
+		"[%s] %d hits; took: %dms",
 		res.Status(),
 		total,
 		took,
