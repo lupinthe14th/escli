@@ -221,12 +221,13 @@ func searchAction(c *cli.Context) error {
 		took,
 	)
 	if c.Bool("print") {
-		printAmplitudeIDSummary(amplitudeIDs)
+		printAmplitudeIDSummary(c, amplitudeIDs)
 	}
 	return nil
 }
 
-func printAmplitudeIDSummary(amplitudeIDs []AmplitudeID) {
+func printAmplitudeIDSummary(c *cli.Context, amplitudeIDs []AmplitudeID) {
+	w := c.App.Writer
 	memo := make(map[string]int)
 	for _, v := range amplitudeIDs {
 		memo[v.UserID]++
@@ -246,7 +247,7 @@ func printAmplitudeIDSummary(amplitudeIDs []AmplitudeID) {
 		return userIDs[i].count < userIDs[j].count
 	})
 	for i, userID := range userIDs {
-		log.Debug().Msgf("%v: %v: %v", i+1, userID.uuid, userID.count)
+		fmt.Fprintf(w, "%v: %v: %v\n", i+1, userID.uuid, userID.count)
 	}
 }
 
