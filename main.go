@@ -5,13 +5,14 @@ import (
 	"strings"
 
 	"github.com/lupinthe14th/escli/pkg/version"
-	"github.com/sirupsen/logrus"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v2"
 )
 
 func main() {
 	if err := newApp().Run(os.Args); err != nil {
-		logrus.Fatal(err)
+		log.Fatal().Err(err)
 	}
 }
 
@@ -51,12 +52,11 @@ func newApp() *cli.App {
 		},
 	}
 	app.Before = func(c *cli.Context) error {
+		zerolog.SetGlobalLevel(zerolog.InfoLevel)
 		if debug {
-			logrus.SetLevel(logrus.DebugLevel)
+			zerolog.SetGlobalLevel(zerolog.DebugLevel)
 		}
-		logrus.SetFormatter(&logrus.TextFormatter{
-			FullTimestamp: true,
-		})
+		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 		return nil
 	}
 

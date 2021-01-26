@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/rs/zerolog/log"
 	"github.com/urfave/cli/v2"
 )
 
@@ -24,6 +25,7 @@ func newClient(c *cli.Context) (*elasticsearch.Client, error) {
 		Username:  username,
 		Password:  password,
 		Transport: tp,
+		Logger:    &CustomLogger{log.Logger},
 	}
 	es, err := elasticsearch.NewClient(cfg)
 	if err != nil {
