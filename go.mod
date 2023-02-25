@@ -10,5 +10,5 @@ require (
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/tidwall/gjson v1.9.3
 	github.com/urfave/cli/v2 v2.3.0
-	golang.org/x/sys v0.0.0-20201223074533-0d417f636930 // indirect
+	golang.org/x/sys v0.1.0 // indirect
 )
